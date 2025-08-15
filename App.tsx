@@ -202,66 +202,64 @@ export default function App() {
 
   // Ctrl+Tab file navigation
   useEffect(() => {
-      let ctrlPressed = false;
+    const handleKeyDown = (e: KeyboardEvent) => {
+        // Only trigger on Ctrl+Tab or Ctrl+Shift+Tab
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'tab') {
+            e.preventDefault();
+            
+            if (visitedFileStack.length < 2) return;
 
-      const handleKeyDown = (e: KeyboardEvent) => {
-          if (e.key === 'Control' || e.key === 'Meta') {
-              ctrlPressed = true;
-          }
+            if (!isNavigatorOpen) {
+                setIsNavigatorOpen(true);
+                // On first press, select the previously opened file (index 1 in reversed list)
+                setNavigatorIndex(1); 
+            } else {
+                // If navigator is already open, cycle through the list
+                setNavigatorIndex(prev => {
+                    const direction = e.shiftKey ? -1 : 1;
+                    const maxIndex = Math.min(visitedFileStack.length - 1, 9); // Show max 10 files
+                    let nextIndex = prev + direction;
+                    
+                    if (nextIndex > maxIndex) nextIndex = 0;
+                    if (nextIndex < 0) nextIndex = maxIndex;
+                    
+                    return nextIndex;
+                });
+            }
+        }
+    };
 
-          if (ctrlPressed && e.key === 'Tab') {
-              e.preventDefault();
-              if (visitedFileStack.length < 2) return;
+    const handleKeyUp = (e: KeyboardEvent) => {
+        // When the Ctrl/Meta key is released, close the navigator and select the file
+        if ((e.key === 'Control' || e.key === 'Meta') && isNavigatorOpen) {
+            setIsNavigatorOpen(false);
+            
+            const reversedStack = [...visitedFileStack].reverse();
+            const navigatorList = reversedStack.slice(0, 10);
+            const selectedPath = navigatorList[navigatorIndex];
+            
+            if (selectedPath && selectedPath !== selectedFilePath) {
+                handleFileSelect(selectedPath);
+            }
+        }
+    };
+    
+    // If the window loses focus, close the navigator
+    const handleBlur = () => {
+        if (isNavigatorOpen) {
+            setIsNavigatorOpen(false);
+        }
+    }
 
-              if (!isNavigatorOpen) {
-                  setIsNavigatorOpen(true);
-                  setNavigatorIndex(1); // Start selection on the previously opened file
-              } else {
-                  setNavigatorIndex(prev => {
-                      const direction = e.shiftKey ? -1 : 1;
-                      const maxIndex = Math.min(visitedFileStack.length - 1, 9); // Show max 10 files
-                      let nextIndex = prev + direction;
-                      if (nextIndex > maxIndex) nextIndex = 0;
-                      if (nextIndex < 0) nextIndex = maxIndex;
-                      return nextIndex;
-                  });
-              }
-          }
-      };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
 
-      const handleKeyUp = (e: KeyboardEvent) => {
-          if (e.key === 'Control' || e.key === 'Meta') {
-              ctrlPressed = false;
-              if (isNavigatorOpen) {
-                  setIsNavigatorOpen(false);
-                  const reversedStack = [...visitedFileStack].reverse();
-                  const maxIndex = Math.min(reversedStack.length, 10);
-                  const navigatorList = reversedStack.slice(0, maxIndex);
-                  
-                  const selectedPath = navigatorList[navigatorIndex];
-                  if (selectedPath && selectedPath !== selectedFilePath) {
-                      handleFileSelect(selectedPath);
-                  }
-              }
-          }
-      };
-      
-      const handleBlur = () => {
-          ctrlPressed = false;
-          if(isNavigatorOpen) {
-              setIsNavigatorOpen(false);
-          }
-      }
-
-      window.addEventListener('keydown', handleKeyDown);
-      window.addEventListener('keyup', handleKeyUp);
-      window.addEventListener('blur', handleBlur);
-
-      return () => {
-          window.removeEventListener('keydown', handleKeyDown);
-          window.removeEventListener('keyup', handleKeyUp);
-          window.removeEventListener('blur', handleBlur);
-      };
+    return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('keyup', handleKeyUp);
+        window.removeEventListener('blur', handleBlur);
+    };
   }, [isNavigatorOpen, visitedFileStack, navigatorIndex, selectedFilePath, handleFileSelect]);
   
   const loadRepo = async (url: string) => {
