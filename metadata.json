@@ -1,0 +1,5 @@
+{
+  "name": "GitHub Repository Explorer",
+  "description": "A web-based tool to browse files from any public GitHub repository. Enter a repository URL to view its file tree and code content.",
+  "requestFramePermissions": []
+}
