@@ -1,3 +1,5 @@
+
+
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import FileTree from './components/FileTree';
 import EditorDisplay from './components/EditorDisplay';
@@ -44,7 +46,7 @@ const ChatIcon = () => (
 );
 
 interface PopupState<T> { isVisible: boolean; isLoading: boolean; error: string | null; data: T | null; }
-interface ExplanationPopupState extends PopupState<Explanation> { x: number; y: number; }
+interface ExplanationPopupState extends PopupState<Explanation> {}
 interface SummaryPopupState extends PopupState<string> {}
 
 const flattenTree = (nodes: TreeNode[]): string[] => {
@@ -61,9 +63,19 @@ const flattenTree = (nodes: TreeNode[]): string[] => {
     return paths;
 };
 
+const parseExplanationMarkdown = (markdown: string): Explanation => {
+    const explanationMatch = markdown.match(/## Explanation\s*([\s\S]*?)(?=## Example|$)/i);
+    const exampleMatch = markdown.match(/## Example\s*([\s\S]*)/i);
+    return {
+        explanation: explanationMatch ? explanationMatch[1].trim() : '',
+        example: exampleMatch ? exampleMatch[1].trim() : markdown.includes('## Example') ? exampleMatch?.[1].trim() ?? '' : ''
+    };
+};
+
 export default function App() {
   const [repoUrl, setRepoUrl] = useState('');
   const [repoInfo, setRepoInfo] = useState<RepoInfo | null>(null);
+  const [defaultBranch, setDefaultBranch] = useState<string>('');
   const [fileTree, setFileTree] = useState<TreeNode[]>([]);
   const [allFilePaths, setAllFilePaths] = useState<string[]>([]);
 
@@ -86,8 +98,10 @@ export default function App() {
   const [geminiApiKey, setGeminiApiKey] = useState<string | null>(getGeminiApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
 
-  const [explanationPopup, setExplanationPopup] = useState<ExplanationPopupState>({ isVisible: false, x: 0, y: 0, data: null, isLoading: false, error: null });
+  const [explanationPopup, setExplanationPopup] = useState<ExplanationPopupState>({ isVisible: false, data: null, isLoading: false, error: null });
   const [summaryPopup, setSummaryPopup] = useState<SummaryPopupState>({ isVisible: false, data: null, isLoading: false, error: null });
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [isExplaining, setIsExplaining] = useState(false);
   
   const [searchHistory, setSearchHistory] = useState<string[]>(getSearchHistory());
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
@@ -111,7 +125,7 @@ export default function App() {
   }, []);
 
   const handleFileSelect = useCallback(async (path: string) => {
-    if (!repoInfo || path === selectedFilePath) return;
+    if (!repoInfo || !defaultBranch || path === selectedFilePath) return;
 
     closePopups();
     setSelectedFilePath(path);
@@ -129,7 +143,7 @@ export default function App() {
     });
 
     try {
-      const content = await fetchFileContent(repoInfo.owner, repoInfo.repo, path);
+      const content = await fetchFileContent(repoInfo.owner, repoInfo.repo, defaultBranch, path);
       setSelectedFileContent(content);
     } catch (err) {
         setContentError(err instanceof Error ? err.message : 'An unknown error occurred while fetching the file.');
@@ -137,7 +151,7 @@ export default function App() {
     } finally {
       setIsContentLoading(false);
     }
-  }, [repoInfo, selectedFilePath, closePopups]);
+  }, [repoInfo, selectedFilePath, closePopups, defaultBranch]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => (e.key === 'Control' || e.key === 'Meta') && setIsCtrlDown(true);
@@ -299,6 +313,7 @@ export default function App() {
     setTreeError(null);
     setFileTree([]);
     setAllFilePaths([]);
+    setDefaultBranch('');
     setSelectedFilePath(null);
     setSelectedFileContent(null);
     setVisitedFileStack([]); // Reset history for new repo
@@ -307,9 +322,10 @@ export default function App() {
     setSearchHistory(getSearchHistory());
 
     try {
-      const tree = await fetchRepoTree(info.owner, info.repo);
+      const { tree, defaultBranch: branch } = await fetchRepoTree(info.owner, info.repo);
       setFileTree(tree);
       setAllFilePaths(flattenTree(tree));
+      setDefaultBranch(branch);
     } catch (err) {
       setTreeError(err instanceof Error ? err.message : 'An unknown error occurred.');
     } finally {
@@ -338,7 +354,8 @@ export default function App() {
     if (!selectedFileContent || isCtrlDown || !geminiApiKey) return;
 
     closePopups();
-    setExplanationPopup({ isVisible: true, x: event.clientX, y: event.clientY, isLoading: true, data: null, error: null });
+    setIsExplaining(true);
+    setExplanationPopup({ isVisible: true, isLoading: false, data: { explanation: '', example: '' }, error: null });
 
     let codeContext = selectedFileContent;
     if (explanationContext === 'partial') {
@@ -352,10 +369,20 @@ export default function App() {
     }
 
     try {
-        const explanation = await getCodeExplanation(selectedText, codeContext);
-        setExplanationPopup(prev => ({ ...prev, isLoading: false, data: explanation }));
+        const explanationStream = getCodeExplanation(selectedText, codeContext);
+        let fullText = '';
+        for await (const chunk of explanationStream) {
+            fullText += chunk;
+            const parsedData = parseExplanationMarkdown(fullText);
+            setExplanationPopup(prev => ({ 
+                ...prev, 
+                data: parsedData,
+            }));
+        }
     } catch (err) {
         setExplanationPopup(prev => ({ ...prev, isLoading: false, error: err instanceof Error ? err.message : 'An unknown error occurred.' }));
+    } finally {
+        setIsExplaining(false);
     }
   }, [selectedFileContent, explanationContext, isCtrlDown, geminiApiKey, closePopups]);
 
@@ -363,13 +390,21 @@ export default function App() {
     if (!selectedFileContent || !selectedFilePath || !geminiApiKey) return;
 
     closePopups();
-    setSummaryPopup({ isVisible: true, isLoading: true, data: null, error: null });
+    setIsSummarizing(true);
+    setSummaryPopup({ isVisible: true, isLoading: false, data: '', error: null });
 
     try {
-        const summary = await getFileSummary(selectedFilePath, selectedFileContent);
-        setSummaryPopup({ isVisible: true, isLoading: false, data: summary, error: null });
+        const summaryStream = getFileSummary(selectedFilePath, selectedFileContent);
+        for await (const chunk of summaryStream) {
+            setSummaryPopup(prev => ({ 
+                ...prev,
+                data: (prev.data || '') + chunk 
+            }));
+        }
     } catch (err) {
         setSummaryPopup({ isVisible: true, isLoading: false, data: null, error: err instanceof Error ? err.message : 'An unknown error occurred.' });
+    } finally {
+        setIsSummarizing(false);
     }
   }, [selectedFileContent, selectedFilePath, geminiApiKey, closePopups]);
 
@@ -533,7 +568,7 @@ export default function App() {
             <EditorDisplay 
               ref={editorContainerRef}
               filePath={selectedFilePath} content={selectedFileContent} isLoading={isContentLoading} error={contentError}
-              onTextSelect={handleTextSelection} onSummarize={handleSummarizeFile} isSummarizing={summaryPopup.isLoading}
+              onTextSelect={handleTextSelection} onSummarize={handleSummarizeFile} isSummarizing={isSummarizing}
               onGoToDefinition={handleGoToDefinition}
               isAiEnabled={!!geminiApiKey}
             />
@@ -550,6 +585,7 @@ export default function App() {
                       isAiEnabled={!!geminiApiKey}
                       allFilePaths={allFilePaths}
                       repoInfo={repoInfo}
+                      defaultBranch={defaultBranch}
                     />
               </div>
           )}
@@ -558,13 +594,16 @@ export default function App() {
       
       {explanationPopup.isVisible && (
         <ExplanationPopup
-            x={explanationPopup.x} y={explanationPopup.y} explanationData={explanationPopup.data}
-            isLoading={explanationPopup.isLoading} error={explanationPopup.error} onClose={() => setExplanationPopup(p => ({...p, isVisible: false}))}
+            explanationData={explanationPopup.data}
+            isLoading={explanationPopup.isLoading} error={explanationPopup.error} 
+            isStreaming={isExplaining}
+            onClose={() => setExplanationPopup(p => ({...p, isVisible: false}))}
         />
       )}
       {summaryPopup.isVisible && (
         <SummaryPopup 
             summary={summaryPopup.data} isLoading={summaryPopup.isLoading} error={summaryPopup.error} 
+            isStreaming={isSummarizing}
             onClose={() => setSummaryPopup(p => ({...p, isVisible: false}))} 
         />
       )}
@@ -595,6 +634,7 @@ export default function App() {
             isAiEnabled={!!geminiApiKey}
             allFilePaths={allFilePaths}
             repoInfo={repoInfo}
+            defaultBranch={defaultBranch}
         />
       )}
     </div>

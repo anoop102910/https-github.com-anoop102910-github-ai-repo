@@ -89,7 +89,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, onFileSelect, selectedFilePat
   }
   
   return (
-    <div className="p-2 space-y-1">
+    <div className="p-2 space-y-1 w-[300px]">
       {tree.sort((a,b) => {
         if (a.type === b.type) return a.name.localeCompare(b.name);
         return a.type === 'tree' ? -1 : 1;

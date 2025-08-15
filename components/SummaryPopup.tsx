@@ -1,8 +1,11 @@
 import React, { useEffect, useRef } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 interface SummaryPopupProps {
   summary: string | null;
   isLoading: boolean;
+  isStreaming: boolean;
   error: string | null;
   onClose: () => void;
 }
@@ -13,7 +16,7 @@ const LoadingSpinner = () => (
     </div>
 );
 
-const SummaryPopup: React.FC<SummaryPopupProps> = ({ summary, isLoading, error, onClose }) => {
+const SummaryPopup: React.FC<SummaryPopupProps> = ({ summary, isLoading, isStreaming, error, onClose }) => {
     const popupRef = useRef<HTMLDivElement>(null);
 
     // Close on escape key
@@ -28,6 +31,18 @@ const SummaryPopup: React.FC<SummaryPopupProps> = ({ summary, isLoading, error, 
             window.removeEventListener('keydown', handleKeyDown);
         };
     }, [onClose]);
+
+    const renderContent = () => {
+        if (isLoading) return <LoadingSpinner />;
+        if (error) return <div className="text-red-400 p-4 bg-red-900/20 rounded-md"><strong>Error:</strong> {error}</div>;
+        if (summary === null) return null;
+
+        const rawMarkup = marked.parse(summary, { gfm: true, breaks: true, async: false }) as string;
+        const sanitizedMarkup = DOMPurify.sanitize(rawMarkup);
+        const cursor = isStreaming ? '<span class="blinking-cursor"></span>' : '';
+
+        return <div className="prose prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizedMarkup + cursor }} />;
+    };
     
     return (
         <div 
@@ -48,11 +63,7 @@ const SummaryPopup: React.FC<SummaryPopupProps> = ({ summary, isLoading, error, 
                 </div>
 
                 <div className="p-5 overflow-y-auto">
-                    {isLoading && <LoadingSpinner />}
-                    {error && <div className="text-red-400 p-4 bg-red-900/20 rounded-md"><strong>Error:</strong> {error}</div>}
-                    {summary && !isLoading && (
-                        <p className="text-base text-gray-300 leading-relaxed whitespace-pre-wrap">{summary}</p>
-                    )}
+                    {renderContent()}
                 </div>
             </div>
         </div>

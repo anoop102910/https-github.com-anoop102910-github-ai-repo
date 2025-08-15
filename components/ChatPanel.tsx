@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, FormEvent, useMemo } from 'react';
 import { GoogleGenAI, Chat } from '@google/genai';
 import { marked } from 'marked';
@@ -15,6 +16,7 @@ interface ChatPanelProps {
   allFilePaths: string[];
   repoInfo: RepoInfo | null;
   displayMode: ChatDisplayMode;
+  defaultBranch: string;
 }
 
 const AddIcon = () => (
@@ -23,7 +25,7 @@ const AddIcon = () => (
     </svg>
 );
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, selectedFilePath, isAiEnabled, allFilePaths, repoInfo, displayMode }) => {
+const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, selectedFilePath, isAiEnabled, allFilePaths, repoInfo, displayMode, defaultBranch }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -73,9 +75,14 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, selectedFilePath
         let initialPrompt = 'Hello! How can I help you explore this repository?';
 
         if (contextFilesArray.length > 0) {
+            if (!defaultBranch) {
+                setMessages([{ role: 'system-info', text: `Could not load file context because the repository appears to be empty or has no default branch.` }]);
+                setIsLoading(false);
+                return;
+            }
             setMessages([{ role: 'system-info', text: `Loading context from ${contextFilesArray.length} file(s)...` }]);
             const contentPromises = contextFilesArray.map(path => 
-                fetchFileContent(repoInfo.owner, repoInfo.repo, path)
+                fetchFileContent(repoInfo.owner, repoInfo.repo, defaultBranch, path)
                     .then(content => `--- START OF FILE: ${path} ---\n${content}\n--- END OF FILE: ${path} ---`)
                     .catch(() => `--- Could not load file: ${path} ---`)
             );
@@ -104,7 +111,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, selectedFilePath
 
     initializeChat();
     // Using JSON.stringify to get a stable dependency for the array
-  }, [isOpen, isAiEnabled, repoInfo, JSON.stringify(contextFilesArray)]);
+  }, [isOpen, isAiEnabled, repoInfo, defaultBranch, JSON.stringify(contextFilesArray)]);
 
 
   useEffect(() => {
@@ -116,29 +123,44 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, selectedFilePath
     if (!input.trim() || isLoading || !chatInstance.current) return;
 
     const userMessage: Message = { role: 'user', text: input };
-    setMessages(prev => [...prev, userMessage]);
+    const currentInput = input;
+    
+    setMessages(prev => [...prev, userMessage, { role: 'model', text: '' }]);
     setInput('');
     setIsLoading(true);
 
     try {
-      const response = await chatInstance.current.sendMessage({ message: input });
-      const aiMessage: Message = { role: 'model', text: response.text };
-      setMessages(prev => [...prev, aiMessage]);
+      const stream = await chatInstance.current.sendMessageStream({ message: currentInput });
+      
+      let fullText = '';
+      for await (const chunk of stream) {
+        fullText += chunk.text;
+        setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = { role: 'model', text: fullText };
+            return newMessages;
+        });
+      }
 
     } catch (error) {
       console.error("Error sending message to Gemini:", error);
-      const errorMessage: Message = { role: 'model', text: `Sorry, I encountered an error. ${error instanceof Error ? error.message : 'Please try again.'}` };
-      setMessages(prev => [...prev, errorMessage]);
+      const errorMessageText = `Sorry, I encountered an error. ${error instanceof Error ? error.message : 'Please try again.'}`;
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1] = { role: 'model', text: errorMessageText };
+        return newMessages;
+      });
     } finally {
       setIsLoading(false);
     }
   };
   
-  const renderMessageText = (text: string) => {
+  const renderMessageText = (text: string, isStreaming: boolean) => {
     const rawMarkup = marked.parse(text, { gfm: true, breaks: true, async: false });
     // Type assertion because marked types are not perfect with async: false
     const sanitizedMarkup = DOMPurify.sanitize(rawMarkup as string);
-    return <div dangerouslySetInnerHTML={{ __html: sanitizedMarkup }} />;
+    const cursor = isStreaming ? '<span class="blinking-cursor"></span>' : '';
+    return <div dangerouslySetInnerHTML={{ __html: sanitizedMarkup + cursor }} />;
   };
 
   const removeContextFile = (pathToRemove: string) => {
@@ -186,20 +208,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, selectedFilePath
               <div className="text-center text-sm text-gray-500 py-2 w-full">{msg.text}</div>
             ) : (
               <div className={`max-w-sm lg:max-w-md px-4 py-2 rounded-lg ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}`}>
-                  <div className="prose prose-sm prose-invert max-w-none">{renderMessageText(msg.text)}</div>
+                  <div className="prose prose-sm prose-invert max-w-none">{renderMessageText(msg.text, isLoading && msg.role === 'model' && index === messages.length -1)}</div>
               </div>
             )}
           </div>
         ))}
-        {isLoading && messages.length > 0 && (
-          <div className="flex justify-start">
-            <div className="max-w-sm lg:max-w-md px-4 py-2 rounded-lg bg-gray-700 text-gray-300 flex items-center">
-              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
-              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce mx-1.5" style={{animationDelay: '0.1s'}}></div>
-              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-            </div>
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
       

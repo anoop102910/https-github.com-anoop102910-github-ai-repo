@@ -49,7 +49,7 @@ const buildFileTree = (files: GithubFile[]): TreeNode[] => {
     return rootNodes;
 };
 
-export const fetchRepoTree = async (owner: string, repo: string): Promise<TreeNode[]> => {
+export const fetchRepoTree = async (owner: string, repo: string): Promise<{ tree: TreeNode[], defaultBranch: string }> => {
     // First, get repo info to find the default branch
     const repoDetailsRes = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}`);
     if (!repoDetailsRes.ok) {
@@ -61,7 +61,7 @@ export const fetchRepoTree = async (owner: string, repo: string): Promise<TreeNo
 
     // Repositories can exist without a default branch if they are empty.
     if (!defaultBranch) {
-        return [];
+        return { tree: [], defaultBranch: '' };
     }
 
     // Then, fetch the file tree for the default branch
@@ -69,7 +69,7 @@ export const fetchRepoTree = async (owner: string, repo: string): Promise<TreeNo
 
     // For empty repositories, the tree endpoint often returns 404 or 409. Treat this as an empty file tree.
     if (treeRes.status === 404 || treeRes.status === 409) {
-        return [];
+        return { tree: [], defaultBranch };
     }
 
     if (!treeRes.ok) {
@@ -85,26 +85,21 @@ export const fetchRepoTree = async (owner: string, repo: string): Promise<TreeNo
     // Safely return an empty array if `treeData.tree` is not an array.
     if (!Array.isArray(treeData.tree)) {
         console.warn('GitHub API response for tree did not contain a valid "tree" array. Assuming empty repository.', treeData);
-        return [];
+        return { tree: [], defaultBranch };
     }
     
-    return buildFileTree(treeData.tree);
+    return { tree: buildFileTree(treeData.tree), defaultBranch };
 };
 
-export const fetchFileContent = async (owner: string, repo: string, path: string): Promise<string> => {
-    const contentRes = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}`);
+export const fetchFileContent = async (owner: string, repo: string, branch: string, path: string): Promise<string> => {
+    const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+    const contentRes = await fetch(url);
     if (!contentRes.ok) {
+        if (contentRes.status === 404) {
+             throw new Error(`File not found: ${path}. It might be a submodule or may have been moved.`);
+        }
         throw new Error(`Failed to fetch file content for ${path}. Status: ${contentRes.status}`);
     }
-    const contentData = await contentRes.json();
-    if (contentData.encoding !== 'base64') {
-        throw new Error('Unsupported file encoding received.');
-    }
-    
-    try {
-        return atob(contentData.content);
-    } catch (e) {
-        console.error("Failed to decode base64 content", e);
-        throw new Error("Failed to decode file content.");
-    }
+    const content = await contentRes.text();
+    return content;
 };
