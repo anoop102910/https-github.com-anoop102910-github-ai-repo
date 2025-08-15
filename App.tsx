@@ -12,7 +12,7 @@ import { getCodeExplanation, getFileSummary } from './services/geminiService';
 import { 
     getSearchHistory, addSearchHistoryItem, clearSearchHistory, 
     getExplanationContext as getStoredContext, setExplanationContext as setStoredContext, 
-    getGeminiApiKey, setGeminiApiKey as saveGeminiApiKey, clearGeminiApiKey,
+    getGeminiApiKey, saveGeminiApiKeyToStorage, clearGeminiApiKey,
     getChatDisplayMode, setChatDisplayMode as saveChatDisplayMode
 } from './services/localStorageService';
 import { resolveImportPath } from './services/pathService';
@@ -406,7 +406,7 @@ export default function App() {
   
   const handleSaveApiKey = () => {
     if (apiKeyInput.trim()) {
-        saveGeminiApiKey(apiKeyInput.trim());
+        saveGeminiApiKeyToStorage(apiKeyInput.trim());
         setGeminiApiKey(apiKeyInput.trim());
         setApiKeyInput('');
     }

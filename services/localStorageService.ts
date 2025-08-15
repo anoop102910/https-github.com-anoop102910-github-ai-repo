@@ -102,7 +102,7 @@ export const getGeminiApiKey = (): string | null => {
     }
 };
 
-export const setGeminiApiKey = (apiKey: string): void => {
+export const saveGeminiApiKeyToStorage = (apiKey: string): void => {
     try {
         localStorage.setItem(GEMINI_API_KEY, apiKey);
     } catch (error) {
