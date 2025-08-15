@@ -4,6 +4,8 @@ import EditorDisplay from './components/EditorDisplay';
 import ExplanationPopup from './components/ExplanationPopup';
 import SummaryPopup from './components/SummaryPopup';
 import SearchHistory from './components/SearchHistory';
+import FileSearch from './components/FileSearch';
+import FileHistoryNavigator from './components/FileHistoryNavigator';
 import { parseGitHubUrl, fetchRepoTree, fetchFileContent } from './services/githubService';
 import { getCodeExplanation, getFileSummary } from './services/geminiService';
 import { getSearchHistory, addSearchHistoryItem, clearSearchHistory, getExplanationContext as getStoredContext, setExplanationContext as setStoredContext, getGeminiApiKey, setGeminiApiKey, clearGeminiApiKey } from './services/localStorageService';
@@ -21,6 +23,12 @@ const SettingsIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.096 2.572-1.065z" />
     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
   </svg>
+);
+
+const SearchIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+    </svg>
 );
 
 interface PopupState<T> { isVisible: boolean; isLoading: boolean; error: string | null; data: T | null; }
@@ -52,6 +60,7 @@ export default function App() {
   
   const [isTreeLoading, setIsTreeLoading] = useState(false);
   const [isContentLoading, setIsContentLoading] = useState(false);
+  const [isFileSearchOpen, setIsFileSearchOpen] = useState(false);
 
   const [treeError, setTreeError] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
@@ -76,6 +85,45 @@ export default function App() {
   const [highlightStyle, setHighlightStyle] = useState<React.CSSProperties | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const highlightTimeoutRef = useRef<number | null>(null);
+
+  // --- Visited Files Navigator State ---
+  const [visitedFileStack, setVisitedFileStack] = useState<string[]>([]);
+  const [isNavigatorOpen, setIsNavigatorOpen] = useState(false);
+  const [navigatorIndex, setNavigatorIndex] = useState(0);
+
+  const closePopups = useCallback(() => {
+    setExplanationPopup(p => ({ ...p, isVisible: false }));
+    setSummaryPopup(p => ({ ...p, isVisible: false }));
+  }, []);
+
+  const handleFileSelect = useCallback(async (path: string) => {
+    if (!repoInfo || path === selectedFilePath) return;
+
+    closePopups();
+    setSelectedFilePath(path);
+    setIsContentLoading(true);
+    setContentError(null);
+
+    setVisitedFileStack(prevStack => {
+        const newStack = prevStack.filter(p => p !== path);
+        newStack.push(path);
+        // Cap the stack size to a reasonable number
+        if (newStack.length > 15) {
+            newStack.shift();
+        }
+        return newStack;
+    });
+
+    try {
+      const content = await fetchFileContent(repoInfo.owner, repoInfo.repo, path);
+      setSelectedFileContent(content);
+    } catch (err) {
+        setContentError(err instanceof Error ? err.message : 'An unknown error occurred while fetching the file.');
+        setSelectedFileContent(null);
+    } finally {
+      setIsContentLoading(false);
+    }
+  }, [repoInfo, selectedFilePath, closePopups]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => (e.key === 'Control' || e.key === 'Meta') && setIsCtrlDown(true);
@@ -135,12 +183,86 @@ export default function App() {
       setScrollToLine(null); // Reset after scroll
     }
   }, [scrollToLine]);
+  
+  // File Search shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+            e.preventDefault();
+            if (allFilePaths.length > 0) {
+              setIsFileSearchOpen(true);
+            }
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [allFilePaths.length]);
 
+  // Ctrl+Tab file navigation
+  useEffect(() => {
+      let ctrlPressed = false;
 
-  const closePopups = () => {
-    setExplanationPopup(p => ({ ...p, isVisible: false }));
-    setSummaryPopup(p => ({ ...p, isVisible: false }));
-  };
+      const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'Control' || e.key === 'Meta') {
+              ctrlPressed = true;
+          }
+
+          if (ctrlPressed && e.key === 'Tab') {
+              e.preventDefault();
+              if (visitedFileStack.length < 2) return;
+
+              if (!isNavigatorOpen) {
+                  setIsNavigatorOpen(true);
+                  setNavigatorIndex(1); // Start selection on the previously opened file
+              } else {
+                  setNavigatorIndex(prev => {
+                      const direction = e.shiftKey ? -1 : 1;
+                      const maxIndex = Math.min(visitedFileStack.length - 1, 9); // Show max 10 files
+                      let nextIndex = prev + direction;
+                      if (nextIndex > maxIndex) nextIndex = 0;
+                      if (nextIndex < 0) nextIndex = maxIndex;
+                      return nextIndex;
+                  });
+              }
+          }
+      };
+
+      const handleKeyUp = (e: KeyboardEvent) => {
+          if (e.key === 'Control' || e.key === 'Meta') {
+              ctrlPressed = false;
+              if (isNavigatorOpen) {
+                  setIsNavigatorOpen(false);
+                  const reversedStack = [...visitedFileStack].reverse();
+                  const maxIndex = Math.min(reversedStack.length, 10);
+                  const navigatorList = reversedStack.slice(0, maxIndex);
+                  
+                  const selectedPath = navigatorList[navigatorIndex];
+                  if (selectedPath && selectedPath !== selectedFilePath) {
+                      handleFileSelect(selectedPath);
+                  }
+              }
+          }
+      };
+      
+      const handleBlur = () => {
+          ctrlPressed = false;
+          if(isNavigatorOpen) {
+              setIsNavigatorOpen(false);
+          }
+      }
+
+      window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('keyup', handleKeyUp);
+      window.addEventListener('blur', handleBlur);
+
+      return () => {
+          window.removeEventListener('keydown', handleKeyDown);
+          window.removeEventListener('keyup', handleKeyUp);
+          window.removeEventListener('blur', handleBlur);
+      };
+  }, [isNavigatorOpen, visitedFileStack, navigatorIndex, selectedFilePath, handleFileSelect]);
   
   const loadRepo = async (url: string) => {
     const info = parseGitHubUrl(url);
@@ -156,6 +278,7 @@ export default function App() {
     setAllFilePaths([]);
     setSelectedFilePath(null);
     setSelectedFileContent(null);
+    setVisitedFileStack([]); // Reset history for new repo
     setRepoInfo(info);
     addSearchHistoryItem(url);
     setSearchHistory(getSearchHistory());
@@ -188,25 +311,6 @@ export default function App() {
     setIsHistoryVisible(false);
   }
 
-  const handleFileSelect = useCallback(async (path: string) => {
-    if (!repoInfo || path === selectedFilePath) return;
-
-    closePopups();
-    setSelectedFilePath(path);
-    setIsContentLoading(true);
-    setContentError(null);
-
-    try {
-      const content = await fetchFileContent(repoInfo.owner, repoInfo.repo, path);
-      setSelectedFileContent(content);
-    } catch (err) {
-        setContentError(err instanceof Error ? err.message : 'An unknown error occurred while fetching the file.');
-        setSelectedFileContent(null);
-    } finally {
-      setIsContentLoading(false);
-    }
-  }, [repoInfo, selectedFilePath]);
-
   const handleTextSelection = useCallback(async (selectedText: string, event: React.MouseEvent) => {
     if (!selectedFileContent || isCtrlDown || !geminiApiKey) return;
 
@@ -230,7 +334,7 @@ export default function App() {
     } catch (err) {
         setExplanationPopup(prev => ({ ...prev, isLoading: false, error: err instanceof Error ? err.message : 'An unknown error occurred.' }));
     }
-  }, [selectedFileContent, explanationContext, isCtrlDown, geminiApiKey]);
+  }, [selectedFileContent, explanationContext, isCtrlDown, geminiApiKey, closePopups]);
 
   const handleSummarizeFile = useCallback(async () => {
     if (!selectedFileContent || !selectedFilePath || !geminiApiKey) return;
@@ -244,7 +348,7 @@ export default function App() {
     } catch (err) {
         setSummaryPopup({ isVisible: true, isLoading: false, data: null, error: err instanceof Error ? err.message : 'An unknown error occurred.' });
     }
-  }, [selectedFileContent, selectedFilePath, geminiApiKey]);
+  }, [selectedFileContent, selectedFilePath, geminiApiKey, closePopups]);
 
   const handleGoToDefinition = useCallback((token: string) => {
     if (!selectedFileContent || !selectedFilePath || !allFilePaths.length) return;
@@ -290,6 +394,11 @@ export default function App() {
     setGeminiApiKey(null);
   };
   
+  const navigatorFiles = useMemo(() => {
+    const reversed = [...visitedFileStack].reverse();
+    return reversed.slice(0, 10); // Show max 10 files
+  }, [visitedFileStack]);
+
   return (
     <div className="flex flex-col h-screen bg-gray-800 text-gray-300">
       <header className="flex-shrink-0 bg-gray-900 border-b border-gray-700 p-2 shadow-md z-20 flex items-center justify-between">
@@ -356,11 +465,26 @@ export default function App() {
       </header>
 
       <main className="flex-grow flex overflow-hidden">
-        <aside className="w-1/4 max-w-xs min-w-[200px] bg-gray-800 border-r border-gray-700 overflow-y-auto">
-          {isTreeLoading && <div className="p-4 text-center">Loading file tree...</div>}
-          {treeError && <div className="p-4 text-red-400">Error: {treeError}</div>}
-          {!isTreeLoading && !treeError && repoInfo && <FileTree tree={fileTree} onFileSelect={handleFileSelect} selectedFilePath={selectedFilePath} />}
-          {!repoInfo && !isTreeLoading && !treeError && <div className="p-4 text-gray-500">Enter a repository URL to start browsing.</div>}
+        <aside className="w-1/4 max-w-xs min-w-[200px] bg-gray-800 border-r border-gray-700 flex flex-col">
+          {repoInfo && (
+            <div className="flex-shrink-0 flex items-center justify-between p-2 border-b border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Explorer</h3>
+                <button 
+                  onClick={() => setIsFileSearchOpen(true)} 
+                  title="Search files (Ctrl+P)"
+                  className="p-1 rounded hover:bg-gray-700"
+                  aria-label="Search files"
+                >
+                  <SearchIcon />
+                </button>
+            </div>
+          )}
+          <div className="overflow-y-auto">
+            {isTreeLoading && <div className="p-4 text-center">Loading file tree...</div>}
+            {treeError && <div className="p-4 text-red-400">Error: {treeError}</div>}
+            {!isTreeLoading && !treeError && repoInfo && <FileTree tree={fileTree} onFileSelect={handleFileSelect} selectedFilePath={selectedFilePath} />}
+            {!repoInfo && !isTreeLoading && !treeError && <div className="p-4 text-gray-500">Enter a repository URL to start browsing.</div>}
+          </div>
         </aside>
         
         <section className="flex-grow relative">
@@ -385,6 +509,24 @@ export default function App() {
         <SummaryPopup 
             summary={summaryPopup.data} isLoading={summaryPopup.isLoading} error={summaryPopup.error} 
             onClose={() => setSummaryPopup(p => ({...p, isVisible: false}))} 
+        />
+      )}
+      {isFileSearchOpen && (
+          <FileSearch 
+              isOpen={isFileSearchOpen}
+              onClose={() => setIsFileSearchOpen(false)}
+              allFilePaths={allFilePaths}
+              onFileSelect={(path) => {
+                  handleFileSelect(path);
+                  setIsFileSearchOpen(false);
+              }}
+          />
+      )}
+      {isNavigatorOpen && (
+        <FileHistoryNavigator
+          isOpen={isNavigatorOpen}
+          files={navigatorFiles}
+          selectedIndex={navigatorIndex}
         />
       )}
     </div>
