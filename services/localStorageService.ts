@@ -2,6 +2,7 @@ import { ExplanationContextType } from '../types';
 
 const SEARCH_HISTORY_KEY = 'githubRepoViewer_searchHistory';
 const EXPLANATION_CONTEXT_KEY = 'githubRepoViewer_explanationContext';
+const GEMINI_API_KEY = 'githubRepoViewer_geminiApiKey';
 const MAX_HISTORY_ITEMS = 10;
 
 // --- Search History ---
@@ -67,3 +68,30 @@ export const setExplanationContext = (context: ExplanationContextType): void => 
         console.error("Failed to save explanation context to localStorage", error);
     }
 }
+
+// --- API Key ---
+
+export const getGeminiApiKey = (): string | null => {
+    try {
+        return localStorage.getItem(GEMINI_API_KEY);
+    } catch (error) {
+        console.error("Failed to get Gemini API key from localStorage", error);
+        return null;
+    }
+};
+
+export const setGeminiApiKey = (apiKey: string): void => {
+    try {
+        localStorage.setItem(GEMINI_API_KEY, apiKey);
+    } catch (error) {
+        console.error("Failed to save Gemini API key to localStorage", error);
+    }
+};
+
+export const clearGeminiApiKey = (): void => {
+    try {
+        localStorage.removeItem(GEMINI_API_KEY);
+    } catch (error) {
+        console.error("Failed to clear Gemini API key from localStorage", error);
+    }
+};

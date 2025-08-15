@@ -6,7 +6,7 @@ import SummaryPopup from './components/SummaryPopup';
 import SearchHistory from './components/SearchHistory';
 import { parseGitHubUrl, fetchRepoTree, fetchFileContent } from './services/githubService';
 import { getCodeExplanation, getFileSummary } from './services/geminiService';
-import { getSearchHistory, addSearchHistoryItem, clearSearchHistory, getExplanationContext as getStoredContext, setExplanationContext as setStoredContext } from './services/localStorageService';
+import { getSearchHistory, addSearchHistoryItem, clearSearchHistory, getExplanationContext as getStoredContext, setExplanationContext as setStoredContext, getGeminiApiKey, setGeminiApiKey, clearGeminiApiKey } from './services/localStorageService';
 import { resolveImportPath } from './services/pathService';
 import { TreeNode, RepoInfo, Explanation, ExplanationContextType, GithubFile } from './types';
 
@@ -60,6 +60,9 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   
+  const [geminiApiKey, setGeminiApiKey] = useState<string | null>(getGeminiApiKey());
+  const [apiKeyInput, setApiKeyInput] = useState('');
+
   const [explanationPopup, setExplanationPopup] = useState<ExplanationPopupState>({ isVisible: false, x: 0, y: 0, data: null, isLoading: false, error: null });
   const [summaryPopup, setSummaryPopup] = useState<SummaryPopupState>({ isVisible: false, data: null, isLoading: false, error: null });
   
@@ -205,7 +208,7 @@ export default function App() {
   }, [repoInfo, selectedFilePath]);
 
   const handleTextSelection = useCallback(async (selectedText: string, event: React.MouseEvent) => {
-    if (!selectedFileContent || isCtrlDown) return;
+    if (!selectedFileContent || isCtrlDown || !geminiApiKey) return;
 
     closePopups();
     setExplanationPopup({ isVisible: true, x: event.clientX, y: event.clientY, isLoading: true, data: null, error: null });
@@ -227,10 +230,10 @@ export default function App() {
     } catch (err) {
         setExplanationPopup(prev => ({ ...prev, isLoading: false, error: err instanceof Error ? err.message : 'An unknown error occurred.' }));
     }
-  }, [selectedFileContent, explanationContext, isCtrlDown]);
+  }, [selectedFileContent, explanationContext, isCtrlDown, geminiApiKey]);
 
   const handleSummarizeFile = useCallback(async () => {
-    if (!selectedFileContent || !selectedFilePath) return;
+    if (!selectedFileContent || !selectedFilePath || !geminiApiKey) return;
 
     closePopups();
     setSummaryPopup({ isVisible: true, isLoading: true, data: null, error: null });
@@ -241,7 +244,7 @@ export default function App() {
     } catch (err) {
         setSummaryPopup({ isVisible: true, isLoading: false, data: null, error: err instanceof Error ? err.message : 'An unknown error occurred.' });
     }
-  }, [selectedFileContent, selectedFilePath]);
+  }, [selectedFileContent, selectedFilePath, geminiApiKey]);
 
   const handleGoToDefinition = useCallback((token: string) => {
     if (!selectedFileContent || !selectedFilePath || !allFilePaths.length) return;
@@ -274,6 +277,19 @@ export default function App() {
 
   }, [selectedFileContent, selectedFilePath, allFilePaths, handleFileSelect]);
   
+  const handleSaveApiKey = () => {
+    if (apiKeyInput.trim()) {
+        setGeminiApiKey(apiKeyInput.trim());
+        setGeminiApiKey(apiKeyInput.trim());
+        setApiKeyInput('');
+    }
+  };
+
+  const handleClearApiKey = () => {
+    clearGeminiApiKey();
+    setGeminiApiKey(null);
+  };
+  
   return (
     <div className="flex flex-col h-screen bg-gray-800 text-gray-300">
       <header className="flex-shrink-0 bg-gray-900 border-b border-gray-700 p-2 shadow-md z-20 flex items-center justify-between">
@@ -303,7 +319,7 @@ export default function App() {
         <div className="relative ml-4" ref={settingsRef}>
           <button onClick={() => setIsSettingsOpen(!isSettingsOpen)} aria-label="Settings"><SettingsIcon /></button>
           {isSettingsOpen && (
-            <div className="absolute right-0 mt-2 w-72 bg-gray-800 border border-gray-600 rounded-md shadow-lg py-2">
+            <div className="absolute right-0 mt-2 w-80 bg-gray-800 border border-gray-600 rounded-md shadow-lg py-2">
               <div className="px-3 py-1 text-sm font-semibold text-gray-400">Explanation Context</div>
               <label className="flex items-center px-3 py-2 text-sm hover:bg-gray-700 cursor-pointer">
                 <input type="radio" name="context" value="full" checked={explanationContext === 'full'} onChange={() => setExplanationContext('full')} className="mr-2 h-4 w-4 bg-gray-700 border-gray-500 text-blue-500 focus:ring-blue-500"/>
@@ -313,6 +329,27 @@ export default function App() {
                 <input type="radio" name="context" value="partial" checked={explanationContext === 'partial'} onChange={() => setExplanationContext('partial')} className="mr-2 h-4 w-4 bg-gray-700 border-gray-500 text-blue-500 focus:ring-blue-500"/>
                 Partial Snippet (Faster)
               </label>
+              <div className="border-t border-gray-700 my-2"></div>
+              <div className="px-3 py-1 text-sm font-semibold text-gray-400">Gemini API Key</div>
+              <div className="px-3 py-2">
+                {geminiApiKey ? (
+                    <div className='flex items-center justify-between'>
+                        <code className='text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded'>{`${geminiApiKey.substring(0, 4)}...${geminiApiKey.slice(-4)}`}</code>
+                        <button onClick={handleClearApiKey} className='text-xs bg-red-600 hover:bg-red-700 text-white font-semibold rounded px-2 py-1'>Clear</button>
+                    </div>
+                ) : (
+                    <div className='flex items-center space-x-2'>
+                        <input 
+                            type="password"
+                            value={apiKeyInput}
+                            onChange={e => setApiKeyInput(e.target.value)}
+                            placeholder='Enter your API key'
+                            className='flex-grow bg-gray-700 text-sm text-gray-200 placeholder-gray-400 border border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
+                        />
+                        <button onClick={handleSaveApiKey} className='text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded px-2 py-1'>Save</button>
+                    </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -332,6 +369,7 @@ export default function App() {
             filePath={selectedFilePath} content={selectedFileContent} isLoading={isContentLoading} error={contentError}
             onTextSelect={handleTextSelection} onSummarize={handleSummarizeFile} isSummarizing={summaryPopup.isLoading}
             onGoToDefinition={handleGoToDefinition}
+            isAiEnabled={!!geminiApiKey}
           />
           {highlightStyle && <div className="line-highlight" style={highlightStyle} />}
         </section>

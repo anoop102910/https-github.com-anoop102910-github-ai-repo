@@ -1,16 +1,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Explanation } from '../types';
+import { getGeminiApiKey } from './localStorageService';
 
-// This will be populated by the environment automatically
-const API_KEY = process.env.API_KEY;
-
-if (!API_KEY) {
-  // In a real app, you might want to disable the feature or show a message.
-  // For this context, we will throw an error if the key is missing.
-  console.error("API_KEY is not set. AI features will not work.");
-}
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+const getAiClient = (): GoogleGenAI => {
+    const apiKey = getGeminiApiKey();
+    if (!apiKey) {
+        throw new Error("Gemini API key is not configured. Please add it in the settings.");
+    }
+    return new GoogleGenAI({ apiKey });
+};
 
 const explanationSchema = {
     type: Type.OBJECT,
@@ -28,11 +26,9 @@ const explanationSchema = {
 };
 
 export const getCodeExplanation = async (selectedText: string, codeContext: string): Promise<Explanation> => {
-    if (!API_KEY) {
-        throw new Error("Gemini API key is not configured.");
-    }
-
-    const prompt = `
+    try {
+        const ai = getAiClient();
+        const prompt = `
 You are an expert programmer and a helpful coding assistant. A user has selected a piece of text from a code file and wants to understand it.
 
 The selected text is: \`${selectedText}\`
@@ -45,7 +41,6 @@ ${codeContext}
 Please provide a concise explanation of what the selected text is and its role in this specific context. Also, provide a generic, easy-to-understand code example of how it is typically used.
 `;
 
-    try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
@@ -62,6 +57,10 @@ Please provide a concise explanation of what the selected text is and its role i
     } catch (error) {
         console.error("Error fetching explanation from Gemini:", error);
         if (error instanceof Error) {
+            // Pass on the specific "key not configured" error
+            if (error.message.includes("not configured")) {
+                throw error;
+            }
             throw new Error(`Failed to get explanation from AI: ${error.message}`);
         }
         throw new Error("An unknown error occurred while communicating with the AI.");
@@ -69,10 +68,9 @@ Please provide a concise explanation of what the selected text is and its role i
 };
 
 export const getFileSummary = async (fileName: string, fileContent: string): Promise<string> => {
-    if (!API_KEY) {
-        throw new Error("Gemini API key is not configured.");
-    }
-    const prompt = `
+    try {
+        const ai = getAiClient();
+        const prompt = `
 You are an expert programmer and a helpful coding assistant. Please provide a concise summary of the following code file.
 Explain its main purpose, what it exports (if anything), and its key functionalities. Format the summary in clear, easy-to-read paragraphs.
 
@@ -83,7 +81,6 @@ File Content:
 ${fileContent}
 \`\`\`
 `;
-    try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
@@ -92,6 +89,10 @@ ${fileContent}
     } catch (error) {
         console.error("Error fetching summary from Gemini:", error);
         if (error instanceof Error) {
+            // Pass on the specific "key not configured" error
+            if (error.message.includes("not configured")) {
+                throw error;
+            }
             throw new Error(`Failed to get summary from AI: ${error.message}`);
         }
         throw new Error("An unknown error occurred while communicating with the AI.");

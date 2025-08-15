@@ -50,9 +50,10 @@ interface EditorDisplayProps {
   onSummarize: () => void;
   isSummarizing: boolean;
   onGoToDefinition: (token: string) => void;
+  isAiEnabled: boolean;
 }
 
-const EditorDisplay = forwardRef<HTMLDivElement, EditorDisplayProps>(({ filePath, content, isLoading, error, onTextSelect, onSummarize, isSummarizing, onGoToDefinition }, ref) => {
+const EditorDisplay = forwardRef<HTMLDivElement, EditorDisplayProps>(({ filePath, content, isLoading, error, onTextSelect, onSummarize, isSummarizing, onGoToDefinition, isAiEnabled }, ref) => {
   const codeRef = useRef<HTMLElement>(null);
 
   const highlightedCode = useMemo(() => {
@@ -175,7 +176,8 @@ const EditorDisplay = forwardRef<HTMLDivElement, EditorDisplayProps>(({ filePath
         {filePath && content && !isLoading && (
           <button
             onClick={onSummarize}
-            disabled={isSummarizing}
+            disabled={isSummarizing || !isAiEnabled}
+            title={!isAiEnabled ? "Please add your Gemini API key in settings" : "Summarize the contents of this file"}
             className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded px-2 py-1 disabled:bg-gray-500 disabled:cursor-not-allowed flex items-center transition-colors"
           >
             {isSummarizing ? (
