@@ -39,6 +39,10 @@
         z-index: 5;
         pointer-events: none;
       }
+      /* Styles for prose in chat */
+      .prose-invert code::before, .prose-invert code::after {
+        content: "" !important;
+      }
     </style>
   <script type="importmap">
 {
@@ -46,7 +50,9 @@
     "react": "https://esm.sh/react@^19.1.1",
     "react-dom/": "https://esm.sh/react-dom@^19.1.1/",
     "react/": "https://esm.sh/react@^19.1.1/",
-    "@google/genai": "https://esm.sh/@google/genai"
+    "@google/genai": "https://esm.sh/@google/genai",
+    "marked": "https://esm.sh/marked",
+    "dompurify": "https://esm.sh/dompurify"
   }
 }
 </script>

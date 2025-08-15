@@ -59,8 +59,19 @@ export const fetchRepoTree = async (owner: string, repo: string): Promise<TreeNo
     const repoDetails = await repoDetailsRes.json();
     const defaultBranch = repoDetails.default_branch;
 
+    // Repositories can exist without a default branch if they are empty.
+    if (!defaultBranch) {
+        return [];
+    }
+
     // Then, fetch the file tree for the default branch
     const treeRes = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${defaultBranch}?recursive=1`);
+
+    // For empty repositories, the tree endpoint often returns 404 or 409. Treat this as an empty file tree.
+    if (treeRes.status === 404 || treeRes.status === 409) {
+        return [];
+    }
+
     if (!treeRes.ok) {
         throw new Error(`Failed to fetch repository tree. Status: ${treeRes.status}`);
     }
@@ -68,6 +79,13 @@ export const fetchRepoTree = async (owner: string, repo: string): Promise<TreeNo
     
     if (treeData.truncated) {
         console.warn("File tree is truncated. Some files may not be shown.");
+    }
+    
+    // The `tree` property might be missing in some edge cases.
+    // Safely return an empty array if `treeData.tree` is not an array.
+    if (!Array.isArray(treeData.tree)) {
+        console.warn('GitHub API response for tree did not contain a valid "tree" array. Assuming empty repository.', treeData);
+        return [];
     }
     
     return buildFileTree(treeData.tree);

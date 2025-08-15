@@ -25,3 +25,10 @@ export interface Explanation {
   explanation: string;
   example: string;
 }
+
+export interface Message {
+  role: 'user' | 'model' | 'system-info';
+  text: string;
+}
+
+export type ChatDisplayMode = 'drawer' | 'docked' | 'modal';

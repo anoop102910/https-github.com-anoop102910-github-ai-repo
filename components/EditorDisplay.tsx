@@ -161,7 +161,7 @@ const EditorDisplay = forwardRef<HTMLDivElement, EditorDisplayProps>(({ filePath
         <pre
             onMouseUp={handleMouseUp}
             onClick={handleCodeClick}
-            className="whitespace-pre-wrap break-words select-text w-full code-interactive"
+            className="whitespace-pre-wrap break-words break-all select-text w-full code-interactive"
           >
             <code ref={codeRef} className="font-mono" dangerouslySetInnerHTML={{ __html: highlightedCode }}/>
           </pre>

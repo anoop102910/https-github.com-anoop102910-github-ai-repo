@@ -1,8 +1,9 @@
-import { ExplanationContextType } from '../types';
+import { ExplanationContextType, ChatDisplayMode } from '../types';
 
 const SEARCH_HISTORY_KEY = 'githubRepoViewer_searchHistory';
 const EXPLANATION_CONTEXT_KEY = 'githubRepoViewer_explanationContext';
 const GEMINI_API_KEY = 'githubRepoViewer_geminiApiKey';
+const CHAT_DISPLAY_MODE_KEY = 'githubRepoViewer_chatDisplayMode';
 const MAX_HISTORY_ITEMS = 10;
 
 // --- Search History ---
@@ -68,6 +69,27 @@ export const setExplanationContext = (context: ExplanationContextType): void => 
         console.error("Failed to save explanation context to localStorage", error);
     }
 }
+
+export const getChatDisplayMode = (): ChatDisplayMode | null => {
+    try {
+        const mode = localStorage.getItem(CHAT_DISPLAY_MODE_KEY);
+        if (mode === 'drawer' || mode === 'docked' || mode === 'modal') {
+            return mode;
+        }
+    } catch (error) {
+        console.error("Failed to get chat display mode from localStorage", error);
+    }
+    return null;
+}
+
+export const setChatDisplayMode = (mode: ChatDisplayMode): void => {
+    try {
+        localStorage.setItem(CHAT_DISPLAY_MODE_KEY, mode);
+    } catch (error) {
+        console.error("Failed to save chat display mode to localStorage", error);
+    }
+}
+
 
 // --- API Key ---
 

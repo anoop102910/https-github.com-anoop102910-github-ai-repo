@@ -11,7 +11,9 @@
   "dependencies": {
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "@google/genai": "latest"
+    "@google/genai": "latest",
+    "marked": "latest",
+    "dompurify": "latest"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -6,11 +6,17 @@ import SummaryPopup from './components/SummaryPopup';
 import SearchHistory from './components/SearchHistory';
 import FileSearch from './components/FileSearch';
 import FileHistoryNavigator from './components/FileHistoryNavigator';
+import ChatPanel from './components/ChatPanel';
 import { parseGitHubUrl, fetchRepoTree, fetchFileContent } from './services/githubService';
 import { getCodeExplanation, getFileSummary } from './services/geminiService';
-import { getSearchHistory, addSearchHistoryItem, clearSearchHistory, getExplanationContext as getStoredContext, setExplanationContext as setStoredContext, getGeminiApiKey, setGeminiApiKey, clearGeminiApiKey } from './services/localStorageService';
+import { 
+    getSearchHistory, addSearchHistoryItem, clearSearchHistory, 
+    getExplanationContext as getStoredContext, setExplanationContext as setStoredContext, 
+    getGeminiApiKey, setGeminiApiKey as saveGeminiApiKey, clearGeminiApiKey,
+    getChatDisplayMode, setChatDisplayMode as saveChatDisplayMode
+} from './services/localStorageService';
 import { resolveImportPath } from './services/pathService';
-import { TreeNode, RepoInfo, Explanation, ExplanationContextType, GithubFile } from './types';
+import { TreeNode, RepoInfo, Explanation, ExplanationContextType, GithubFile, ChatDisplayMode } from './types';
 
 const GithubIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 16 16">
@@ -28,6 +34,12 @@ const SettingsIcon = () => (
 const SearchIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+    </svg>
+);
+
+const ChatIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-400 hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
     </svg>
 );
 
@@ -61,6 +73,8 @@ export default function App() {
   const [isTreeLoading, setIsTreeLoading] = useState(false);
   const [isContentLoading, setIsContentLoading] = useState(false);
   const [isFileSearchOpen, setIsFileSearchOpen] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatDisplayMode, setChatDisplayMode] = useState<ChatDisplayMode>(getChatDisplayMode() || 'drawer');
 
   const [treeError, setTreeError] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
@@ -155,6 +169,10 @@ export default function App() {
   useEffect(() => {
     setStoredContext(explanationContext);
   }, [explanationContext]);
+  
+  useEffect(() => {
+    saveChatDisplayMode(chatDisplayMode);
+  }, [chatDisplayMode]);
 
   useEffect(() => {
     if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
@@ -184,13 +202,20 @@ export default function App() {
     }
   }, [scrollToLine]);
   
-  // File Search shortcut
+  // File Search (Ctrl+P) and Chat (Ctrl+K) shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
-            e.preventDefault();
-            if (allFilePaths.length > 0) {
-              setIsFileSearchOpen(true);
+        if (e.ctrlKey || e.metaKey) {
+            if (e.key === 'p') {
+                e.preventDefault();
+                if (allFilePaths.length > 0) {
+                    setIsFileSearchOpen(true);
+                }
+            } else if (e.key === 'k') {
+                e.preventDefault();
+                if (geminiApiKey) {
+                    setIsChatOpen(prev => !prev);
+                }
             }
         }
     };
@@ -198,7 +223,7 @@ export default function App() {
     return () => {
         window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [allFilePaths.length]);
+  }, [allFilePaths.length, geminiApiKey]);
 
   // Ctrl+Tab file navigation
   useEffect(() => {
@@ -381,7 +406,7 @@ export default function App() {
   
   const handleSaveApiKey = () => {
     if (apiKeyInput.trim()) {
-        setGeminiApiKey(apiKeyInput.trim());
+        saveGeminiApiKey(apiKeyInput.trim());
         setGeminiApiKey(apiKeyInput.trim());
         setApiKeyInput('');
     }
@@ -399,7 +424,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-800 text-gray-300">
-      <header className="flex-shrink-0 bg-gray-900 border-b border-gray-700 p-2 shadow-md z-20 flex items-center justify-between">
+      <header className="flex-shrink-0 bg-gray-900 border-b border-gray-700 p-2 shadow-md z-30 flex items-center justify-between">
         <form onSubmit={handleFetchRepo} className="relative flex items-center flex-grow max-w-2xl mx-auto" ref={searchFormRef}>
           <GithubIcon />
           <input
@@ -423,42 +448,60 @@ export default function App() {
             {isTreeLoading ? ( <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>Loading...</> ) : "Load"}
           </button>
         </form>
-        <div className="relative ml-4" ref={settingsRef}>
-          <button onClick={() => setIsSettingsOpen(!isSettingsOpen)} aria-label="Settings"><SettingsIcon /></button>
-          {isSettingsOpen && (
-            <div className="absolute right-0 mt-2 w-80 bg-gray-800 border border-gray-600 rounded-md shadow-lg py-2">
-              <div className="px-3 py-1 text-sm font-semibold text-gray-400">Explanation Context</div>
-              <label className="flex items-center px-3 py-2 text-sm hover:bg-gray-700 cursor-pointer">
-                <input type="radio" name="context" value="full" checked={explanationContext === 'full'} onChange={() => setExplanationContext('full')} className="mr-2 h-4 w-4 bg-gray-700 border-gray-500 text-blue-500 focus:ring-blue-500"/>
-                Full File (More Accurate)
-              </label>
-              <label className="flex items-center px-3 py-2 text-sm hover:bg-gray-700 cursor-pointer">
-                <input type="radio" name="context" value="partial" checked={explanationContext === 'partial'} onChange={() => setExplanationContext('partial')} className="mr-2 h-4 w-4 bg-gray-700 border-gray-500 text-blue-500 focus:ring-blue-500"/>
-                Partial Snippet (Faster)
-              </label>
-              <div className="border-t border-gray-700 my-2"></div>
-              <div className="px-3 py-1 text-sm font-semibold text-gray-400">Gemini API Key</div>
-              <div className="px-3 py-2">
-                {geminiApiKey ? (
-                    <div className='flex items-center justify-between'>
-                        <code className='text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded'>{`${geminiApiKey.substring(0, 4)}...${geminiApiKey.slice(-4)}`}</code>
-                        <button onClick={handleClearApiKey} className='text-xs bg-red-600 hover:bg-red-700 text-white font-semibold rounded px-2 py-1'>Clear</button>
-                    </div>
-                ) : (
-                    <div className='flex items-center space-x-2'>
-                        <input 
-                            type="password"
-                            value={apiKeyInput}
-                            onChange={e => setApiKeyInput(e.target.value)}
-                            placeholder='Enter your API key'
-                            className='flex-grow bg-gray-700 text-sm text-gray-200 placeholder-gray-400 border border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
-                        />
-                        <button onClick={handleSaveApiKey} className='text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded px-2 py-1'>Save</button>
-                    </div>
-                )}
+        <div className="flex items-center ml-4">
+          <button 
+            onClick={() => setIsChatOpen(true)} 
+            aria-label="Open Chat (Ctrl+K)" 
+            disabled={!geminiApiKey} 
+            title={!geminiApiKey ? "Add API key to enable chat" : "Open AI Chat (Ctrl+K)"}
+            className="disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ChatIcon />
+          </button>
+          <div className="relative ml-4" ref={settingsRef}>
+            <button onClick={() => setIsSettingsOpen(!isSettingsOpen)} aria-label="Settings"><SettingsIcon /></button>
+            {isSettingsOpen && (
+              <div className="absolute right-0 mt-2 w-80 bg-gray-800 border border-gray-600 rounded-md shadow-lg z-50 py-2">
+                <div className="px-3 py-1 text-sm font-semibold text-gray-400">Explanation Context</div>
+                <label className="flex items-center px-3 py-2 text-sm hover:bg-gray-700 cursor-pointer">
+                  <input type="radio" name="context" value="full" checked={explanationContext === 'full'} onChange={() => setExplanationContext('full')} className="mr-2 h-4 w-4 bg-gray-700 border-gray-500 text-blue-500 focus:ring-blue-500"/>
+                  Full File (More Accurate)
+                </label>
+                <label className="flex items-center px-3 py-2 text-sm hover:bg-gray-700 cursor-pointer">
+                  <input type="radio" name="context" value="partial" checked={explanationContext === 'partial'} onChange={() => setExplanationContext('partial')} className="mr-2 h-4 w-4 bg-gray-700 border-gray-500 text-blue-500 focus:ring-blue-500"/>
+                  Partial Snippet (Faster)
+                </label>
+                <div className="border-t border-gray-700 my-2"></div>
+                <div className="px-3 py-1 text-sm font-semibold text-gray-400">Chat Display Mode</div>
+                <div className='px-3 py-1 text-sm flex justify-around'>
+                    <label className='flex items-center cursor-pointer'><input type="radio" name="chatMode" value="drawer" checked={chatDisplayMode === 'drawer'} onChange={() => setChatDisplayMode('drawer')} className="mr-1"/> Drawer</label>
+                    <label className='flex items-center cursor-pointer'><input type="radio" name="chatMode" value="docked" checked={chatDisplayMode === 'docked'} onChange={() => setChatDisplayMode('docked')} className="mr-1"/> Docked</label>
+                    <label className='flex items-center cursor-pointer'><input type="radio" name="chatMode" value="modal" checked={chatDisplayMode === 'modal'} onChange={() => setChatDisplayMode('modal')} className="mr-1"/> Modal</label>
+                </div>
+                <div className="border-t border-gray-700 my-2"></div>
+                <div className="px-3 py-1 text-sm font-semibold text-gray-400">Gemini API Key</div>
+                <div className="px-3 py-2">
+                  {geminiApiKey ? (
+                      <div className='flex items-center justify-between'>
+                          <code className='text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded'>{`${geminiApiKey.substring(0, 4)}...${geminiApiKey.slice(-4)}`}</code>
+                          <button onClick={handleClearApiKey} className='text-xs bg-red-600 hover:bg-red-700 text-white font-semibold rounded px-2 py-1'>Clear</button>
+                      </div>
+                  ) : (
+                      <div className='flex items-center space-x-2'>
+                          <input 
+                              type="password"
+                              value={apiKeyInput}
+                              onChange={e => setApiKeyInput(e.target.value)}
+                              placeholder='Enter your API key'
+                              className='flex-grow bg-gray-700 text-sm text-gray-200 placeholder-gray-400 border border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
+                          />
+                          <button onClick={handleSaveApiKey} className='text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded px-2 py-1'>Save</button>
+                      </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </header>
 
@@ -485,16 +528,32 @@ export default function App() {
           </div>
         </aside>
         
-        <section className="flex-grow relative">
-          <EditorDisplay 
-            ref={editorContainerRef}
-            filePath={selectedFilePath} content={selectedFileContent} isLoading={isContentLoading} error={contentError}
-            onTextSelect={handleTextSelection} onSummarize={handleSummarizeFile} isSummarizing={summaryPopup.isLoading}
-            onGoToDefinition={handleGoToDefinition}
-            isAiEnabled={!!geminiApiKey}
-          />
-          {highlightStyle && <div className="line-highlight" style={highlightStyle} />}
-        </section>
+        <div className="flex-grow flex overflow-hidden">
+          <section className={`relative transition-all duration-300 ease-in-out ${isChatOpen && chatDisplayMode === 'docked' ? 'w-2/3' : 'w-full'}`}>
+            <EditorDisplay 
+              ref={editorContainerRef}
+              filePath={selectedFilePath} content={selectedFileContent} isLoading={isContentLoading} error={contentError}
+              onTextSelect={handleTextSelection} onSummarize={handleSummarizeFile} isSummarizing={summaryPopup.isLoading}
+              onGoToDefinition={handleGoToDefinition}
+              isAiEnabled={!!geminiApiKey}
+            />
+            {highlightStyle && <div className="line-highlight" style={highlightStyle} />}
+          </section>
+
+          {isChatOpen && chatDisplayMode === 'docked' && (
+              <div className="w-1/3 min-w-[350px] flex-shrink-0">
+                  <ChatPanel
+                      isOpen={isChatOpen}
+                      onClose={() => setIsChatOpen(false)}
+                      displayMode="docked"
+                      selectedFilePath={selectedFilePath}
+                      isAiEnabled={!!geminiApiKey}
+                      allFilePaths={allFilePaths}
+                      repoInfo={repoInfo}
+                    />
+              </div>
+          )}
+        </div>
       </main>
       
       {explanationPopup.isVisible && (
@@ -525,6 +584,17 @@ export default function App() {
           isOpen={isNavigatorOpen}
           files={navigatorFiles}
           selectedIndex={navigatorIndex}
+        />
+      )}
+      {(chatDisplayMode === 'drawer' || chatDisplayMode === 'modal') && (
+        <ChatPanel
+            isOpen={isChatOpen}
+            onClose={() => setIsChatOpen(false)}
+            displayMode={chatDisplayMode}
+            selectedFilePath={selectedFilePath}
+            isAiEnabled={!!geminiApiKey}
+            allFilePaths={allFilePaths}
+            repoInfo={repoInfo}
         />
       )}
     </div>
